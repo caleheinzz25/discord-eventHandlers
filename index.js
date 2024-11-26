@@ -114,8 +114,9 @@ class EventHandlers {
                 eventMethod.call(client, eventName, async (eventArg) => {
                     try {
                         // Special handling for interactionCreate event
+                        let commandObject = {};
                         if (eventName === "interactionCreate") {
-                            await this.handleCommands(client, eventArg, this.db);
+                            commandObject = await this.handleCommands(client, eventArg, this.db);
                         } else if (eventName === "ready") {
                             // Special handling for the 'ready' event
                             await this.registerCommands(client);
@@ -127,12 +128,15 @@ class EventHandlers {
                             const handler = funcName === "default" ? eventFile.default : eventFile[funcName];
                             
                             if (handler) {
-                                await handler(client, eventArg, this.db);
-                                console.log(`Executed ${eventName} handler${funcName !== "default" ? `: ${funcName}` : ""}`);
-                            } else {
-                                console.warn(`No handler found for event: ${eventName}`);
+                                if(this.db){
+                                    await handler(client, eventArg, commandObject, this.db);
+                                    continue;
+                                }
+                                await handler(client, eventArg, commandObject);
                             }
                         }
+
+                        console.log(`Executed ${eventName} handler\n`);
                     } catch (error) {
                         console.error(`Error in ${eventName} handler :`, error);
                     }
@@ -196,6 +200,7 @@ class EventHandlers {
      * @param {Object} client - The Discord client instance.
      * @param {Object} interaction - The interaction object from Discord.
      * @param {Object} db - The database object to be used in command execution.
+     * @returns {Object} - The command execution result 
      */
     async handleCommands(client, interaction, db) {
         if (!interaction.isChatInputCommand()) return;
@@ -205,29 +210,29 @@ class EventHandlers {
             const localCommands = await this.getModules("src/commands");
             const commandsList = Object.values(localCommands).flat();
             const commandObject = commandsList.find(cmd => cmd.name === interaction.commandName);
-            console.log(commandsList.find(cmd => cmd.name === interaction.commandName));
 
             if (!commandObject) {
                 console.warn(`Command '${interaction.commandName}' not found.`);
                 return;
             }
-
-            console.log(`Executing command: ${commandObject.name}`);
-
+            
             // Check permissions
-            const filteredCommandObject = this.filterObject(commandObject, [
-                'name', 'description', 'options', 'permissionsRequired', 'botPermissions', 'callback', 'db'
-            ]);
+            const filteredCommandObject = this.filterObject(
+                commandObject, 
+                ['name', 'description', 'options', 'permissionsRequired', 'botPermissions', 'callback', 'db', "devOnly", "data"]
+            );
+
             const permissionCheck = this.checkPermissions(interaction, filteredCommandObject);
 
             if (!permissionCheck.allowed) {
-                const replyMethod = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
+                const replyMethod = interaction.replied || interaction.deferred ? 'reply' : 'editReply';
                 await interaction[replyMethod]({
                     content: permissionCheck.message,
                     ephemeral: true,
                 });
                 return;
             }
+        
 
             // Prepare database objects if required
             if (commandObject.db) {
@@ -238,9 +243,13 @@ class EventHandlers {
                 }, {});
             }
 
+
             // Execute the command
             await commandObject.callback(client, interaction, db);
             console.log(`\nCommand '${commandObject.name}' executed successfully.`);
+
+            return filteredCommandObject;
+
         } catch (error) {
             console.error(`Command execution error for '${interaction.commandName}':`, error);
 
@@ -403,22 +412,8 @@ class EventHandlers {
     }
 
     /**
-     * Filters an object by excluding specified keys.
-     *
-     * @param {Object} obj - The object to filter.
-     * @param {string[]} keysToExclude - Keys to exclude from the object.
-     * @returns {Object} - A new object without the excluded keys.
-     */
-    filterObject(obj, keysToExclude) {
-        return Object.fromEntries(
-            Object.entries(obj).filter(([key]) => !keysToExclude.includes(key))
-        );
-    }
-
-    /**
      * Registers commands with the Discord application.
      * This will check for changes to the local commands and update them on Discord accordingly.
-     * It handles creating new commands, editing existing ones, and deleting outdated ones.
      *
      * @param {Object} client - The Discord client instance.
      */
@@ -429,7 +424,7 @@ class EventHandlers {
             const applicationCommands = await this.getApplicationCommands(client, this.config.testServer);
 
             for (const localCommand of localCommands) {
-                const { name, description, options, deleted } = localCommand;
+                const { commands, name, description, options, deleted } = localCommand;
                 const existingCommand = applicationCommands.cache.find(cmd => cmd.name === name);
 
                 if (existingCommand) {
@@ -442,12 +437,14 @@ class EventHandlers {
 
                     // If the command has changed, update it
                     if (this.areCommandsDifferent(existingCommand, localCommand)) {
-                        await applicationCommands.edit(existingCommand.id, { description, options });
+                        const updatedCommandData = commands || { description, options };
+                        await applicationCommands.edit(existingCommand.id, updatedCommandData);
                         console.log(`🔁 Edited command "${name}".`);
                     }
                 } else if (!deleted) {
                     // If the command doesn't exist and isn't marked for deletion, create it
-                    await applicationCommands.create({ name, description, options });
+                    const newCommandData = commands || { name, description, options };
+                    await applicationCommands.create(newCommandData);
                     console.log(`👍 Registered command "${name}".`);
                 }
             }
@@ -455,6 +452,7 @@ class EventHandlers {
             console.error(`Commands sync error: ${error}`);
         }
     }
+
 
     /**
      * Compares two commands to see if they are different (in terms of description, options, or choices).
@@ -510,9 +508,22 @@ class EventHandlers {
         return applicationCommands;
     }
 
-      
+        /**
+     * Menghapus properti dari objek berdasarkan nama properti yang ada dalam array.
+     * 
+     * @param {Object} obj - Objek yang akan difilter.
+     * @param {Array<string>} keysToRemove - Array yang berisi nama-nama properti yang ingin dihapus dari objek.
+     * @returns {Object} Objek baru yang hanya berisi properti yang tidak ada dalam array `keysToRemove`.
+     */
+    filterObject(obj, keysToRemove) {
+        return Object.keys(obj)
+        .filter(key => !keysToRemove.includes(key)) // Menyaring properti yang tidak ada dalam array
+        .reduce((newObj, key) => {
+            newObj[key] = obj[key]; // Menambahkan properti yang tersisa ke objek baru
+            return newObj;
+        }, {});
+    }
 }
-
 export {
     EventHandlers
 }
