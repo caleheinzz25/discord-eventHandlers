@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 
+
 /**
  * @typedef {Object} dbObject
  * @property {string} [dbPath]
@@ -8,7 +9,7 @@ import path from 'path';
  */
 
 /**
- * @typedef {Object} configObj
+ * @typedef {Object} devObj
  * @property {string} [testServer]
  * @property {string[]} [channels]
  * @property {string[]} [devs]
@@ -17,11 +18,11 @@ import path from 'path';
 
 /**
  * @typedef {Object} EventHandlerOptions
- * @property {Object} client
+ * @property {Client} client
  * @property {string} [commandsPath]
  * @property {string} [eventsPath]
  * @property {dbObject} [db]
- * @property {configObj} [config]
+ * @property {devObj} [devMode]
  */
 
 /**
@@ -31,14 +32,27 @@ class EventHandlers {
     /**
      * @param {EventHandlerOptions} options - The options for the event handler.
      */
-    constructor(options) {
-        this.client = options.client;
-        this.commandsPath = options.commandsPath;
-        this.eventsPath = options.eventsPath;
-        this.dbOptions = options.db;
-        this.config = options.config;
+    constructor(options = {}) {
+        if (!options) {
+            throw new Error("Options object is required to initialize the class.");
+        }
+    
+        this.client = options.client || null;
+        this.commandsPath = options.commandsPath || '';
+        this.eventsPath = options.eventsPath || '';
+        this.dbOptions = options.db || {};
+        this.devMode = options.devMode || false;
         this.db = {};
-
+    
+        if (!this.commandsPath || !this.eventsPath) {
+            console.error(
+                `Initialization failed: Missing ${
+                    !this.commandsPath ? 'commandsPath' : 'eventsPath'
+                }`
+            );
+            return;
+        }
+    
         this.init().catch((error) =>
             console.error("Error during initialization:", error)
         );
@@ -79,18 +93,14 @@ class EventHandlers {
         }
     }
 
-    /**
-     * Handles the registration and execution of event handlers for the client.
-     * 
-     * @param {Object} client - The client object to attach event listeners to.
-     */
     async eventHandler(client) {
         try {
             // Fetch all event files and their handlers
             const events = await this.getObjectModules(this.eventsPath);
+            console.log(events)
             console.log('Starting event handler setup...');
             console.log('Available events:', Object.keys(events));
-
+    
             // Iterate over each event and its corresponding handler files
             for (const [eventName, eventFiles] of Object.entries(events)) {
                 // Skip events without handlers (unless it's a specific event like 'interactionCreate')
@@ -100,16 +110,16 @@ class EventHandlers {
                         continue;
                     }
                 }
-
+    
                 console.log(`\nProcessing event: ${eventName}`);
                 console.log(`Number of handlers: ${eventFiles.length}`);
-
+    
                 // Use `once` for 'ready' event, and `on` for other events
                 const isOnce = eventName === "ready";
                 const eventMethod = isOnce ? client.once : client.on;
-
+    
                 console.log(`Setting up ${eventName} event with ${isOnce ? "'once'" : "'on'"} method...`);
-
+    
                 // Attach the event listener with the appropriate handler(s)
                 eventMethod.call(client, eventName, async (eventArg) => {
                     try {
@@ -121,119 +131,71 @@ class EventHandlers {
                             // Special handling for the 'ready' event
                             await this.registerCommands(client);
                         }
-
                         // Loop through event handlers and execute them
                         for (const eventFile of eventFiles) {
                             const funcName = Object.keys(eventFile)[0];
                             const handler = funcName === "default" ? eventFile.default : eventFile[funcName];
                             
                             if (handler) {
-                                if(this.db){
-                                    await handler(client, eventArg, commandObject, this.db);
+                                if (eventName === "interactionCreate") {
+                                    // Pass commandObject if it is an interaction event
+                                    await handler({ client, interaction:eventArg, command: commandObject.command, db: this.db });
+                                    
+                                    // After handler, run the callback
+                                    if (commandObject.callback) {
+                                        await commandObject.callback({client, interaction:eventArg, command: commandObject.command, db:this.db});
+                                    }
                                     continue;
                                 }
-                                await handler(client, eventArg, commandObject);
+    
+                                if (this.db) {
+                                    await handler({ client, eventArg, db: this.db });
+                                    continue;
+                                }
+    
+                                await handler(client, eventArg);
                             }
                         }
-
-                        console.log(`Executed ${eventName} handler\n`);
+    
+                        // console.log(`Executed ${eventName} handler\n`);
                     } catch (error) {
                         console.error(`Error in ${eventName} handler :`, error);
                     }
                 });
-
+    
                 console.log(`✓ Registered handler for ${eventName} (${isOnce ? "once" : "on"}).`);
             }
         } catch (error) {
             console.error("Event handler setup failed:", error);
         }
     }
-
-
-    /**
-     * Checks if a user and bot meet the required permissions for a command.
-     * 
-     * @param {Object} interaction - The interaction object from Discord.
-     * @param {Object} commandObject - The command object containing permission requirements.
-     * @returns {Object} - An object indicating whether the check passed and an optional message.
-     */
-    checkPermissions(interaction, commandObject) {
-        const { member, guild } = interaction;
-
-        // Dev-only check
-        if (commandObject.devOnly && !this.config.devs.includes(member.id)) {
-            return { allowed: false, message: 'Only developers are allowed to run this command.' };
-        }
-
-        // Test server check
-        if (commandObject.testOnly && guild.id !== this.config.testServer) {
-            return { allowed: false, message: 'This command cannot be run here.' };
-        }
-
-        // User permissions check
-        if (commandObject.permissionsRequired?.length) {
-            const missingPermission = commandObject.permissionsRequired.find(
-                permission => !member.permissions.has(permission)
-            );
-            if (missingPermission) {
-                return { allowed: false, message: `You lack the required permission: ${missingPermission}.` };
-            }
-        }
-
-        // Bot permissions check
-        if (commandObject.botPermissions?.length) {
-            const bot = guild.members.me;
-            const missingBotPermission = commandObject.botPermissions.find(
-                permission => !bot.permissions.has(permission)
-            );
-            if (missingBotPermission) {
-                return { allowed: false, message: `I am missing the required permission: ${missingBotPermission}.` };
-            }
-        }
-
-        return { allowed: true };
-    }
+    
 
     /**
      * Handles the execution of commands triggered by user interactions.
      * 
-     * @param {Object} client - The Discord client instance.
+     * @param {Client} client - The Discord client instance.
      * @param {Object} interaction - The interaction object from Discord.
      * @param {Object} db - The database object to be used in command execution.
      * @returns {Object} - The command execution result 
      */
     async handleCommands(client, interaction, db) {
         if (!interaction.isChatInputCommand()) return;
-
+    
         try {
             // Load and locate the command
             const localCommands = await this.getModules("src/commands");
             const commandsList = Object.values(localCommands).flat();
-            const commandObject = commandsList.find(cmd => cmd.name === interaction.commandName);
-
+    
+            // Find the command object matching the interaction
+            const commandObject = commandsList.find(cmd => cmd.command.name === interaction.commandName);
+    
+            // Check if the commandObject exists before proceeding
             if (!commandObject) {
-                console.warn(`Command '${interaction.commandName}' not found.`);
-                return;
+                console.error(`Command '${interaction.commandName}' not found.`);
+                return;  // Early exit if commandObject is not found
             }
-            
-            // Check permissions
-            const filteredCommandObject = this.filterObject(
-                commandObject, 
-                ['name', 'description', 'options', 'permissionsRequired', 'botPermissions', 'callback', 'db', "devOnly", "data"]
-            );
-
-            const permissionCheck = this.checkPermissions(interaction, filteredCommandObject);
-
-            if (!permissionCheck.allowed) {
-                const replyMethod = interaction.replied || interaction.deferred ? 'reply' : 'editReply';
-                await interaction[replyMethod]({
-                    content: permissionCheck.message,
-                    ephemeral: true,
-                });
-                return;
-            }
-        
-
+    
             // Prepare database objects if required
             if (commandObject.db) {
                 // Only collect db objects that are needed by the command
@@ -242,17 +204,15 @@ class EventHandlers {
                     return acc;
                 }, {});
             }
-
-
-            // Execute the command
-            await commandObject.callback(client, interaction, db);
-            console.log(`\nCommand '${commandObject.name}' executed successfully.`);
-
-            return filteredCommandObject;
-
+    
+            console.log(`\nCommand '${commandObject.command.name}' executed successfully.`);
+    
+            // Return both command and callback
+            return { command: commandObject.command, callback: commandObject.callback };
+    
         } catch (error) {
             console.error(`Command execution error for '${interaction.commandName}':`, error);
-
+    
             try {
                 const replyMethod = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
                 await interaction[replyMethod]({
@@ -264,6 +224,7 @@ class EventHandlers {
             }
         }
     }
+    
 
     /**
      * Recursively retrieves files and folders from a directory.
@@ -356,7 +317,11 @@ class EventHandlers {
                             if (path.extname(modulePath) !== '.js') continue;
 
                             const module = await import(`file://${modulePath}`);
+                            
                             const moduleName = Object.keys(module)[0];
+
+                            if (!moduleName) continue;
+
                             if (moduleName === "default") {
                                 console.error("\n❌ Error: Module name cannot be 'default'. Skipping.\n");
                                 continue;
@@ -377,6 +342,8 @@ class EventHandlers {
                             if (path.extname(modulePath) !== '.js') continue;
 
                             const module = await import(`file://${modulePath}`);
+
+                            if (Object.keys(module).length === 0) continue;
                             folderModules.push(module);
                         } catch (error) {
                             console.error(`Failed to load module from: ${modulePath}`, error);
@@ -399,8 +366,8 @@ class EventHandlers {
      * @param {string} [targetFolder=null] - Optional specific folder to target.
      * @returns {Promise<Array>} - Flattened array of modules.
      */
-    async getModules(basePath, targetFolder = null) {
-        const moduleObjects = await this.getObjectModules(basePath, targetFolder);
+    async getModules(basePath) {
+        const moduleObjects = await this.getObjectModules(basePath);
 
         return Object.values(moduleObjects)
             .flatMap(modules =>
@@ -415,41 +382,91 @@ class EventHandlers {
      * Registers commands with the Discord application.
      * This will check for changes to the local commands and update them on Discord accordingly.
      *
-     * @param {Object} client - The Discord client instance.
+     * @param {Client} client - The Discord client instance.
      */
     async registerCommands(client) {
         try {
-            // Fetch local commands and existing application commands
-            const localCommands = await this.getModules("src/commands");
-            const applicationCommands = await this.getApplicationCommands(client, this.config.testServer);
+            // Fetch local commands
+            const localCommands = await this.getModules(this.commandsPath);
 
-            for (const localCommand of localCommands) {
-                const { commands, name, description, options, deleted } = localCommand;
-                const existingCommand = applicationCommands.cache.find(cmd => cmd.name === name);
-
-                if (existingCommand) {
-                    // If the command is marked as deleted, remove it
-                    if (deleted) {
-                        await applicationCommands.delete(existingCommand.id);
-                        console.log(`🗑 Deleted command "${name}".`);
-                        continue;
+            if (this.devMode) {
+                console.log("🔧 Dev mode is enabled. Syncing new commands only for the test server.");
+            
+                // Fetch the test server's name and ID
+                const testServer = client.guilds.cache.get(this.devMode.testServer);
+            
+                if (!testServer) {
+                    console.error(`❌ Test server with ID "${this.devMode.testServer}" not found in the bot's guild cache.`);
+                    return;
+                }
+            
+                console.log(`📋 Test server: ${testServer.name} (${testServer.id})`);
+            
+                // Fetch application commands for the test server
+                const applicationCommands = await this.getApplicationCommands(client, this.devMode.testServer);
+            
+                for (const localCommand of localCommands) {
+                    if (!localCommand) continue;
+            
+                    const { command, name, description, options, deleted } = localCommand;
+                    const commandData = command || { name, description, options };
+            
+                    const existingCommand = applicationCommands.cache.find(cmd => cmd.name === commandData.name);
+            
+                    if (existingCommand) {
+                        if (deleted) {
+                            await applicationCommands.delete(existingCommand.id);
+                            console.log(`🗑 Deleted command "${commandData.name}" in test server: ${testServer.name} (${testServer.id}).`);
+                            continue;
+                        }
+            
+                        if (this.areCommandsDifferent(existingCommand, commandData)) {
+                            await applicationCommands.edit(existingCommand.id, commandData);
+                            console.log(`🔁 Edited command "${commandData.name}" in test server: ${testServer.name} (${testServer.id}).`);
+                        }
+                    } else if (!deleted) {
+                        await applicationCommands.create(commandData);
+                        console.log(`👍 Registered command "${commandData.name}" in test server: ${testServer.name} (${testServer.id}).`);
                     }
+                }
+            }else {
+                console.log("Syncing commands for all guilds where the bot is present.");
 
-                    // If the command has changed, update it
-                    if (this.areCommandsDifferent(existingCommand, localCommand)) {
-                        const updatedCommandData = commands || { description, options };
-                        await applicationCommands.edit(existingCommand.id, updatedCommandData);
-                        console.log(`🔁 Edited command "${name}".`);
+                // Loop through each guild where the bot is present
+                for (const guild of client.guilds.cache.values()) {
+                    console.log(`🔄 Syncing new commands for guild: ${guild.name} (${guild.id})`);
+
+                    // Fetch existing application commands for the guild
+                    const applicationCommands = await guild.commands.fetch();
+
+                    for (const localCommand of localCommands) {
+                        if (!localCommand) continue;
+
+                        const { command, name, description, options, deleted } = localCommand;
+                        const commandData = command || { name, description, options };
+
+                        const existingCommand = applicationCommands.find(cmd => cmd.name === commandData.name);
+
+                        if (existingCommand) {
+                            if (deleted) {
+                                await guild.commands.delete(existingCommand.id);
+                                console.log(`🗑 Deleted command "${commandData.name}" in guild "${guild.name}".`);
+                                continue;
+                            }
+
+                            if (this.areCommandsDifferent(existingCommand, commandData)) {
+                                await guild.commands.edit(existingCommand.id, commandData);
+                                console.log(`🔁 Edited command "${commandData.name}" in guild "${guild.name}".`);
+                            }
+                        } else if (!deleted) {
+                            await guild.commands.create(commandData);
+                            console.log(`👍 Registered command "${commandData.name}" in guild "${guild.name}".`);
+                        }
                     }
-                } else if (!deleted) {
-                    // If the command doesn't exist and isn't marked for deletion, create it
-                    const newCommandData = commands || { name, description, options };
-                    await applicationCommands.create(newCommandData);
-                    console.log(`👍 Registered command "${name}".`);
                 }
             }
         } catch (error) {
-            console.error(`Commands sync error: ${error}`);
+            console.error(`Commands sync error: ${error.message}`);
         }
     }
 
@@ -488,7 +505,7 @@ class EventHandlers {
     /**
      * Fetches the application commands from Discord, either globally or for a specific guild.
      *
-     * @param {Object} client - The Discord client instance.
+     * @param {Client} client - The Discord client instance.
      * @param {string} guildId - The guild ID (optional for global commands).
      * @returns {Promise<Object>} - The collection of application commands.
      */
@@ -508,7 +525,7 @@ class EventHandlers {
         return applicationCommands;
     }
 
-        /**
+    /**
      * Menghapus properti dari objek berdasarkan nama properti yang ada dalam array.
      * 
      * @param {Object} obj - Objek yang akan difilter.
@@ -523,6 +540,50 @@ class EventHandlers {
             return newObj;
         }, {});
     }
+
+    // /**
+    //  * Checks if a user and bot meet the required permissions for a command.
+    //  * 
+    //  * @param {Object} interaction - The interaction object from Discord.
+    //  * @param {Object} commandObject - The command object containing permission requirements.
+    //  * @returns {Object} - An object indicating whether the check passed and an optional message.
+    //  */
+    // checkPermissions(interaction, commandObject) {
+    //     const { member, guild } = interaction;
+
+    //     // Dev-only check
+    //     if (commandObject.devOnly && !this.config.devs.includes(member.id)) {
+    //         return { allowed: false, message: 'Only developers are allowed to run this command.' };
+    //     }
+
+    //     // Test server check
+    //     if (commandObject.testOnly && guild.id !== this.config.testServer) {
+    //         return { allowed: false, message: 'This command cannot be run here.' };
+    //     }
+
+    //     // User permissions check
+    //     if (commandObject.permissionsRequired?.length) {
+    //         const missingPermission = commandObject.permissionsRequired.find(
+    //             permission => !member.permissions.has(permission)
+    //         );
+    //         if (missingPermission) {
+    //             return { allowed: false, message: `You lack the required permission: ${missingPermission}.` };
+    //         }
+    //     }
+
+    //     // Bot permissions check
+    //     if (commandObject.botPermissions?.length) {
+    //         const bot = guild.members.me;
+    //         const missingBotPermission = commandObject.botPermissions.find(
+    //             permission => !bot.permissions.has(permission)
+    //         );
+    //         if (missingBotPermission) {
+    //             return { allowed: false, message: `I am missing the required permission: ${missingBotPermission}.` };
+    //         }
+    //     }
+
+    //     return { allowed: true };
+    // }
 }
 export {
     EventHandlers

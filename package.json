@@ -1,6 +1,6 @@
 {
   "name": "discord-eventmanager",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "type": "module",
   "description": "Event handler for easy maintain your application discord.js",
   "main": "index.js",
