@@ -1,12 +1,9 @@
 {
-  "name": "discord-eventmanager",
-  "version": "1.0.5",
+  "name": "discord-eventhandlers",
+  "version": "1.0.0",
   "type": "module",
   "description": "Event handler for easy maintain your application discord.js",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/caleheinzz25/discord-eventHandlers.git"
