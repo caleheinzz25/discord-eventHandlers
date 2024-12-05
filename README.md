@@ -91,7 +91,7 @@ or
 import { SlashCommandBuilder } from 'discord.js';
 
 export default {
-    data: new SlashCommandBuilder()
+    command: new SlashCommandBuilder()
         .setName('ping')
         .setDescription('Replies with the bot ping!'),
     async execute({eventArg}) {
@@ -115,7 +115,7 @@ note: you can use normal export {} or default. but for export u cannot import gr
 import { SlashCommandBuilder } from 'discord.js';
 
 const command = {
-    data: new SlashCommandBuilder()
+    command: new SlashCommandBuilder()
         .setName('ping')
         .setDescription('Replies with the bot ping!'),
     async execute({eventArg}) {
@@ -158,7 +158,7 @@ db= your object db instance if u set db path from eventHandlers
 ```js
 
 export default {
-    data: new SlashCommandBuilder()
+    command: new SlashCommandBuilder()
         .setName('ping')
         .setDescription('Replies with the bot ping!'),
     async callback({eventArg, db, command}) {

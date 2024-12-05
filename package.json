@@ -1,6 +1,6 @@
 {
   "name": "discord-eventhandlers",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "Event handler for easy maintain your application discord.js",
   "main": "index.js",
