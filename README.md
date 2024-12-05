@@ -144,12 +144,12 @@ callback: ({ client, eventArg, command, db }) // this all u can get with singgle
 
 ```
 
-client= client objek from Client() instance discord.js
-eventArg= eventArg for interactionCreate
-command= your object command from ur export except callback function
-db= your object db instance if u set db path from eventHandlers 
-
-#example command params
+client= client objek from Client() instance discord.js \n
+eventArg= eventArg for interactionCreate \n
+command= your object command from ur export except callback function \n
+db= your object db instance if u set db path from eventHandlers \n
+ 
+# example command params
 
 ```js
 
@@ -157,8 +157,11 @@ export default {
     data: new SlashCommandBuilder()
         .setName('ping')
         .setDescription('Replies with the bot ping!'),
-    async callback({eventArg}) {
+    async callback({eventArg, db, command}) {
         await eventArg.deferReply();
+         
+        console.log(command.devOnly)
+        console.log(command.someRandomVar) 
 
         db.mongoose.user // this is ur user schema/model, the mongoose name is the prefix name from the name folder db/mongoose
 
