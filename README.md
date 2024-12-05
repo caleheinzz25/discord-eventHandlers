@@ -36,6 +36,7 @@ new EventHandlers({
 
 folder / file structure
 
+```sh
 ├── src
 │   ├── commands
 │   │   ├── moderator
@@ -54,6 +55,7 @@ folder / file structure
 ├── .env                     // Environment variables
 ├── index.js                 // Root application file
 └── package.json
+```
 
 
 ## example for the command 
