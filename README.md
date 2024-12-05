@@ -144,12 +144,16 @@ callback: ({ client, eventArg, command, db }) // this all u can get with singgle
 
 ```
 
-client= client objek from Client() instance discord.js \n
-eventArg= eventArg for interactionCreate \n
-command= your object command from ur export except callback function \n
-db= your object db instance if u set db path from eventHandlers \n
+```sh
+
+client= client objek from Client() instance discord.js 
+eventArg= eventArg for interactionCreate 
+command= your object command from ur export except callback function 
+db= your object db instance if u set db path from eventHandlers 
+
+```
  
-# example command params
+### example command params
 
 ```js
 
@@ -179,4 +183,4 @@ export default {
 
 ```
 
-note: params command object is gonna go trough the events interactionCreate if folder first (if exist) before reaching the callback function so you can set prefix or middleware before the callback function is called
+note: params command object is gonna go trough the events interactionCreate folder first (if exist) before reaching the callback function so you can set prefix or middleware before the callback function is called
