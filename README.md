@@ -5,7 +5,7 @@
 To install the package, use the following command:
 
 ```bash
-npm install djs-eventmanager
+npm install djs-eventhandlers
 ```
 
 ## Setup guide
